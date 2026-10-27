@@ -1,0 +1,173 @@
+name: vaultwarden
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-18-alpine}
+    container_name: vaultwarden-db
+    hostname: vaultwarden-db
+    restart: always
+    network_mode: "none"
+    user: "${APP_UID}:${APP_GID}"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add: []
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+          pids: 150
+    mem_reservation: 256m
+    environment:
+      POSTGRES_DB_FILE: /run/secrets/db_name
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    command:
+      - "postgres"
+      - "-c"
+      - "unix_socket_directories=/var/run/postgresql"
+      - "-c"
+      - "listen_addresses="
+    secrets:
+      - db_name
+      - db_user
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$(cat /run/secrets/db_password)\" psql -U \"$$(cat /run/secrets/db_user)\" -d \"$$(cat /run/secrets/db_name)\" -h /var/run/postgresql -c 'select 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    tmpfs:
+      - /tmp:mode=1777,noexec,nosuid,nodev,size=64m
+    volumes:
+      - postgres_socket:/var/run/postgresql
+      - ./postgres:/var/lib/postgresql:rw,noexec,nosuid,nodev
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  vaultwarden:
+    image: ghcr.io/underhax/vaultwarden-docker:${VW_VERSION:-latest}
+    container_name: vaultwarden-app
+    hostname: vaultwarden-app
+    restart: always
+    user: "${APP_UID}:${APP_GID}"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add: []
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256m
+          pids: 100
+    mem_reservation: 64m
+    env_file:
+      - .env
+    # ports:
+    #   - "${HOST_BIND_IP:-127.0.0.1}:${HOST_PORT:-55080}:8080"
+    tmpfs:
+      - /tmp:mode=1777,noexec,nosuid,nodev,size=64m
+      - /run:mode=1777,noexec,nosuid,nodev,size=16m
+    volumes:
+      - postgres_socket:/var/run/postgresql
+      - ./data:/data:rw,noexec,nosuid,nodev
+      - ./logs:/var/log/vaultwarden:rw,noexec,nosuid,nodev
+      - /etc/localtime:/etc/localtime:ro
+    secrets:
+      - db_name
+      - db_user
+      - db_password
+      - source: rsa_key
+        target: rsa_key.pem
+      # - vw_domain
+      # - vw_admin_token
+      # - vw_org_creation_users
+      # - vw_signups_domains_whitelist
+      # - vw_smtp_host
+      # - vw_smtp_from
+      # - vw_smtp_port
+      # - vw_smtp_username
+      # - vw_smtp_password
+      # - vw_helo_name
+      # - vw_push_installation_id
+      # - vw_push_installation_key
+      # - vw_push_relay_uri
+      # - vw_push_identity_uri
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    networks:
+      - frontend_gateway
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  postgres_socket:
+    name: vaultwarden_postgres_socket
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=8m,mode=0700,uid=${APP_UID},gid=${APP_GID},noexec,nosuid,nodev"
+
+secrets:
+  db_name:
+    file: ./secrets/db_name.txt
+  db_user:
+    file: ./secrets/db_user.txt
+  db_password:
+    file: ./secrets/db_password.txt
+  rsa_key:
+    file: ./secrets/rsa_key.pem
+  # vw_domain:
+  #   file: ./secrets/vw_domain.txt
+  # vw_admin_token:
+  #   file: ./secrets/vw_admin_token.txt
+  # vw_org_creation_users:
+  #   file: ./secrets/vw_org_creation_users.txt
+  # vw_signups_domains_whitelist:
+  #   file: ./secrets/vw_signups_domains_whitelist.txt
+  # vw_smtp_host:
+  #   file: ./secrets/vw_smtp_host.txt
+  # vw_smtp_from:
+  #   file: ./secrets/vw_smtp_from.txt
+  # vw_smtp_port:
+  #   file: ./secrets/vw_smtp_port.txt
+  # vw_smtp_username:
+  #   file: ./secrets/vw_smtp_username.txt
+  # vw_smtp_password:
+  #   file: ./secrets/vw_smtp_password.txt
+  # vw_helo_name:
+  #   file: ./secrets/vw_helo_name.txt
+  # vw_push_installation_id:
+  #   file: ./secrets/vw_push_installation_id.txt
+  # vw_push_installation_key:
+  #   file: ./secrets/vw_push_installation_key.txt
+  # vw_push_relay_uri:
+  #   file: ./secrets/vw_push_relay_uri.txt
+  # vw_push_identity_uri:
+  #   file: ./secrets/vw_push_identity_uri.txt
+
+networks:
+  frontend_gateway:
+    external: true
