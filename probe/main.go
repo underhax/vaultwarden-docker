@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
-	defaultEndpoint = "http://127.0.0.1:8080/alive"
-	probeEnvVar     = "VAULTWARDEN_PROBE_URL"
-	defaultTimeout  = 2 * time.Second
+	defaultEndpoint     = "http://127.0.0.1:8080/alive"
+	defaultDomainPath   = "/run/secrets/vw_domain"
+	aliveEndpointSuffix = "/alive"
+	probeEnvVar         = "VAULTWARDEN_PROBE_URL"
+	defaultTimeout      = 2 * time.Second
 )
 
 var (
@@ -36,10 +39,20 @@ func defaultCreateRequest(ctx context.Context, method, endpoint string, body io.
 	return req, nil
 }
 
+func defaultReadFile(path string) ([]byte, error) {
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading secret file %q: %w", cleanPath, err)
+	}
+	return data, nil
+}
+
 var (
 	createRequest = defaultCreateRequest
 	exitFunc      = os.Exit
 	getTransport  = defaultGetTransport
+	readFile      = defaultReadFile
 )
 
 func defaultDoRequest(ctx context.Context, endpoint string) (err error) {
@@ -84,15 +97,45 @@ func defaultDoRequest(ctx context.Context, endpoint string) (err error) {
 
 var doRequest = defaultDoRequest
 
-// ResolveEndpoint returns the probe target URL from the environment or default.
+func resolveSubpathEndpoint(domain string) string {
+	cleanDomain := strings.TrimSpace(domain)
+	if cleanDomain == "" {
+		return defaultEndpoint
+	}
+
+	if !strings.Contains(cleanDomain, "://") {
+		cleanDomain = "https://" + cleanDomain
+	}
+
+	parsed, err := url.Parse(cleanDomain)
+	if err != nil {
+		return defaultEndpoint
+	}
+
+	subpath := strings.TrimRight(parsed.Path, "/")
+	if subpath == "" {
+		return defaultEndpoint
+	}
+
+	return "http://127.0.0.1:8080" + subpath + aliveEndpointSuffix
+}
+
+// ResolveEndpoint discovers the liveness probe endpoint across environment variables,
+// mounted domain secrets, and runtime defaults to accommodate subpath reverse proxy routing.
 func ResolveEndpoint() string {
 	if val := strings.TrimSpace(os.Getenv(probeEnvVar)); val != "" {
 		return val
 	}
+
+	data, err := readFile(defaultDomainPath)
+	if err == nil {
+		return resolveSubpathEndpoint(string(data))
+	}
+
 	return defaultEndpoint
 }
 
-// CheckEndpoint queries the target endpoint and returns exit code 0 on success.
+// CheckEndpoint executes the liveness check against the designated URL and signals container health via process exit code.
 func CheckEndpoint(ctx context.Context, endpoint string) int {
 	if err := doRequest(ctx, endpoint); err != nil {
 		return 1

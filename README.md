@@ -183,22 +183,19 @@ sudo chmod 0440 /home/vaultwarden/secrets/rsa_key.pem
 
 **Optional: Administrator panel access token:**
 
-To secure the `/admin` portal, Vaultwarden requires an Argon2id password hash.
+To secure the `/admin` portal, Vaultwarden requires an Argon2id password hash. Generate the hash interactively using the container's built-in utility:
 
-> **Note:** Enter and confirm your administrator password at the prompt. The generated Argon2id hash is written directly into the secret file without manual copy-pasting, and the isolated subshell purges the memory variable upon exit. Uncomment `vw_admin_token` in `docker-compose.yaml` (both under `services.vaultwarden.secrets` and the root `secrets:` block).
-
-Initialize the secret file with restricted DAC permissions, then generate and write the hash directly inside an isolated subshell:
+> **Note:** Enter and confirm your administrator password at the prompt. Copy the generated hash string (starting with `$argon2id$`, excluding `ADMIN_TOKEN=` and surrounding quotes) and paste it into `vw_admin_token.txt`. Uncomment `vw_admin_token` in `docker-compose.yaml` (both under `services.vaultwarden.secrets` and the root `secrets:` block).
 
 ```bash
 sudo touch /home/vaultwarden/secrets/vw_admin_token.txt
 sudo chown root:vaultwarden /home/vaultwarden/secrets/vw_admin_token.txt
 sudo chmod 0440 /home/vaultwarden/secrets/vw_admin_token.txt
 
-(
-  TOKEN=$(sudo docker run --rm -it --entrypoint /usr/local/bin/vaultwarden ghcr.io/underhax/vaultwarden-docker:latest hash)
-  printf '%s' "${TOKEN}" | tr -d '\r\n' | sudo tee /home/vaultwarden/secrets/vw_admin_token.txt > /dev/null
-)
+sudo docker run --rm -it --entrypoint /usr/local/bin/vaultwarden \
+  ghcr.io/underhax/vaultwarden-docker:latest hash
 
+sudo nano /home/vaultwarden/secrets/vw_admin_token.txt
 sudo nano /home/vaultwarden/docker-compose.yaml
 ```
 
@@ -216,6 +213,36 @@ sudo chown root:vaultwarden /home/vaultwarden/secrets/vw_domain.txt
 sudo chmod 0440 /home/vaultwarden/secrets/vw_domain.txt
 
 sudo nano /home/vaultwarden/secrets/vw_domain.txt
+sudo nano /home/vaultwarden/docker-compose.yaml
+```
+
+**Optional: Allowed signup domains:**
+
+Overrides `SIGNUPS_ALLOWED` to permit self-registration exclusively for specific email domains (comma-separated, e.g., `example.com,corp.example.com`). When configured, users matching these domains can register even if public signups are globally disabled (`SIGNUPS_ALLOWED=false`).
+
+> **Note:** Uncomment `vw_signups_domains_whitelist` in `docker-compose.yaml` (both under `services.vaultwarden.secrets` and the root `secrets:` block). To completely prohibit all self-registrations without exception, leave this secret commented out.
+
+```bash
+sudo touch /home/vaultwarden/secrets/vw_signups_domains_whitelist.txt
+sudo chown root:vaultwarden /home/vaultwarden/secrets/vw_signups_domains_whitelist.txt
+sudo chmod 0440 /home/vaultwarden/secrets/vw_signups_domains_whitelist.txt
+
+sudo nano /home/vaultwarden/secrets/vw_signups_domains_whitelist.txt
+sudo nano /home/vaultwarden/docker-compose.yaml
+```
+
+**Optional: Organization creation permissions:**
+
+Controls which users are permitted to create new organizations. Specify a comma-separated list of allowed user email addresses (e.g., `admin@example.com,lead@example.com`), `all` to allow any registered user (default behavior), or `none` to completely disable organization creation across the instance.
+
+> **Note:** Uncomment `vw_org_creation_users` in `docker-compose.yaml` (both under `services.vaultwarden.secrets` and the root `secrets:` block).
+
+```bash
+sudo touch /home/vaultwarden/secrets/vw_org_creation_users.txt
+sudo chown root:vaultwarden /home/vaultwarden/secrets/vw_org_creation_users.txt
+sudo chmod 0440 /home/vaultwarden/secrets/vw_org_creation_users.txt
+
+sudo nano /home/vaultwarden/secrets/vw_org_creation_users.txt
 sudo nano /home/vaultwarden/docker-compose.yaml
 ```
 
@@ -268,17 +295,17 @@ sudo docker compose -f /home/vaultwarden/docker-compose.yaml up -d
 
 ### 7. Private Administration Access Recipes
 
-When access to the `/admin` portal is locked down at the perimeter reverse proxy (recommended best practice), administration is performed out-of-band over an isolated loopback binding. If you uncomment the port binding (`HOST_BIND_IP:HOST_PORT`) in `docker-compose.yaml`, the administration portal can be reached securely on `127.0.0.1:55080/admin`:
+When access to the administrative portal is locked down at the perimeter reverse proxy (recommended best practice), administration is performed out-of-band over an isolated loopback binding. If you uncomment the port binding (`HOST_BIND_IP:HOST_PORT`) in `docker-compose.yaml`, the portal can be reached securely:
 
 * **Access via SSH Tunnel (Default — 127.0.0.1):**
   Forward the host port securely over SSH:
   ```bash
   ssh -i ~/.ssh/id_ed25519 -p 22 -N -L 55080:127.0.0.1:55080 user@your-server-ip
   ```
-  Then open `http://127.0.0.1:55080/admin` in your local browser to access the administrator panel.
+  Then open `http://127.0.0.1:55080/admin` (or `http://127.0.0.1:55080/<CUSTOM_SUBPATH>/admin` when using a subpath configured in `secrets/vw_domain.txt`) in your local browser.
 
 * **Access via WireGuard VPN:**
-  In `/home/vaultwarden/.env`, set `HOST_BIND_IP` to your host's WireGuard interface address (e.g. `HOST_BIND_IP='10.8.0.1'`). Authorized VPN clients can then navigate directly to `http://10.8.0.1:55080/admin`.
+  In `/home/vaultwarden/.env`, set `HOST_BIND_IP` to your host's WireGuard interface address (e.g. `HOST_BIND_IP='10.8.0.1'`). Authorized VPN clients can then navigate directly to `http://10.8.0.1:55080/admin` (or `http://10.8.0.1:55080/<CUSTOM_SUBPATH>/admin`).
 
 </details>
 

@@ -67,23 +67,120 @@ func (f *failingReadBody) Close() error {
 	return nil
 }
 
+var (
+	mockFileData []byte
+	errMockFile  error
+)
+
+func mockReadFile(_ string) ([]byte, error) {
+	if errMockFile != nil {
+		return nil, errMockFile
+	}
+	return mockFileData, nil
+}
+
+func TestResolveSubpathEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		domain   string
+		expected string
+	}{
+		{
+			name:     "empty_input",
+			domain:   "   ",
+			expected: defaultEndpoint,
+		},
+		{
+			name:     "root_domain_no_path",
+			domain:   "https://vault.example.com",
+			expected: defaultEndpoint,
+		},
+		{
+			name:     "root_domain_slash_path",
+			domain:   "https://vault.example.com/",
+			expected: defaultEndpoint,
+		},
+		{
+			name:     "subpath_without_trailing_slash",
+			domain:   "https://example.com/custom",
+			expected: "http://127.0.0.1:8080/custom/alive",
+		},
+		{
+			name:     "subpath_with_trailing_slash",
+			domain:   "https://example.com/custom/",
+			expected: "http://127.0.0.1:8080/custom/alive",
+		},
+		{
+			name:     "deep_nested_subpath",
+			domain:   "https://example.net/deep/nested",
+			expected: "http://127.0.0.1:8080/deep/nested/alive",
+		},
+		{
+			name:     "domain_without_scheme",
+			domain:   "example.org/vault",
+			expected: "http://127.0.0.1:8080/vault/alive",
+		},
+		{
+			name:     "invalid_url_format",
+			domain:   "https://example .com",
+			expected: defaultEndpoint,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSubpathEndpoint(tt.domain); got != tt.expected {
+				t.Fatalf("expected endpoint %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
 func TestResolveEndpoint(t *testing.T) {
 	if err := os.Unsetenv(probeEnvVar); err != nil {
 		t.Fatalf("unsetting env: %v", err)
 	}
+
+	origReadFile := readFile
+	readFile = mockReadFile
+	t.Cleanup(func() { readFile = origReadFile })
+
+	mockFileData = nil
+	errMockFile = errors.New("simulated file read error")
+
 	if ep := ResolveEndpoint(); ep != defaultEndpoint {
-		t.Fatalf("expected default endpoint %q, got %q", defaultEndpoint, ep)
+		t.Fatalf("expected default endpoint %q on read failure, got %q", defaultEndpoint, ep)
+	}
+
+	errMockFile = nil
+	mockFileData = []byte("https://example.com/sub")
+	if ep := ResolveEndpoint(); ep != "http://127.0.0.1:8080/sub/alive" {
+		t.Fatalf("expected subpath endpoint from secret, got %q", ep)
 	}
 
 	custom := "http://example.com/alive"
 	t.Setenv(probeEnvVar, custom)
 	if ep := ResolveEndpoint(); ep != custom {
-		t.Fatalf("expected custom endpoint %q, got %q", custom, ep)
+		t.Fatalf("expected env override %q, got %q", custom, ep)
 	}
 
 	t.Setenv(probeEnvVar, "   ")
-	if ep := ResolveEndpoint(); ep != defaultEndpoint {
-		t.Fatalf("expected default endpoint when env is whitespace, got %q", ep)
+	if ep := ResolveEndpoint(); ep != "http://127.0.0.1:8080/sub/alive" {
+		t.Fatalf("expected secret endpoint when env is whitespace, got %q", ep)
+	}
+}
+
+func TestDefaultReadFile(t *testing.T) {
+	if _, err := defaultReadFile("non_existent_file_path"); err == nil {
+		t.Fatal("expected error reading non-existent file, got nil")
+	}
+
+	data, err := defaultReadFile("main.go")
+	if err != nil {
+		t.Fatalf("unexpected error reading existing file: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected non-empty data from existing file")
 	}
 }
 
