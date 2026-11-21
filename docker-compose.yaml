@@ -54,7 +54,7 @@ services:
         max-file: "3"
 
   vaultwarden:
-    image: ghcr.io/underhax/vaultwarden-docker:${VW_VERSION:-latest}
+    image: ghcr.io/underhax/vaultwarden:${VW_VERSION:-latest}
     container_name: vaultwarden-app
     hostname: vaultwarden-app
     restart: always

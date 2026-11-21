@@ -193,7 +193,7 @@ sudo chown root:vaultwarden /home/vaultwarden/secrets/vw_admin_token.txt
 sudo chmod 0440 /home/vaultwarden/secrets/vw_admin_token.txt
 
 sudo docker run --rm -it --entrypoint /usr/local/bin/vaultwarden \
-  ghcr.io/underhax/vaultwarden-docker:latest hash
+  ghcr.io/underhax/vaultwarden:latest hash
 
 sudo nano /home/vaultwarden/secrets/vw_admin_token.txt
 sudo nano /home/vaultwarden/docker-compose.yaml
